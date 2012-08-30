@@ -68,6 +68,9 @@ public class PhysicsGameActivity extends SimpleBaseGameActivity implements
 	private Sprite mGoal;
 	private List<Sprite> mDynamicSprites = new ArrayList<Sprite>();
 
+	private long mStartTime = 0;
+	private long mTimeDiff = 0;
+
 	@Override
 	public EngineOptions onCreateEngineOptions() {
 		mCamera = new Camera(0, 0, CAMERA_WIDTH, CAMERA_HEIGHT);
@@ -114,10 +117,10 @@ public class PhysicsGameActivity extends SimpleBaseGameActivity implements
 				- mBigAssetTextureRegion.getHeight(),
 				this.mBigAssetTextureRegion, vertexBufferObjectManager);
 		this.mScene.attachChild(mBigAsset);
-		
-		this.mGoal = new Sprite(CAMERA_WIDTH / 2,
-				CAMERA_HEIGHT - mGoalTextureRegion.getHeight() - 5,
-				this.mGoalTextureRegion, vertexBufferObjectManager);
+
+		this.mGoal = new Sprite(CAMERA_WIDTH / 2, CAMERA_HEIGHT
+				- mGoalTextureRegion.getHeight() - 5, this.mGoalTextureRegion,
+				vertexBufferObjectManager);
 		this.mScene.attachChild(mGoal);
 
 		final PhysicsEditorLoader loader = new PhysicsEditorLoader();
@@ -135,15 +138,19 @@ public class PhysicsGameActivity extends SimpleBaseGameActivity implements
 
 	@Override
 	public void onUpdate(float pSecondsElapsed) {
-		for(Sprite sprite : mDynamicSprites) {
-			if( mGoal.collidesWith(sprite)) {
-				Log.i("Lounge physics sample", "Goal reached!");
+		for (Sprite sprite : mDynamicSprites) {
+			if (mGoal.collidesWith(sprite)) {
+				if(mTimeDiff  == 0) {
+					this.mTimeDiff = System.currentTimeMillis() - mStartTime;
+					Log.i("Lounge physics sample", "Goal reached in "+ mTimeDiff + " ms!");
+				}
 			}
 		}
 	}
 
 	@Override
-	public void reset() {	}
+	public void reset() {
+	}
 
 	@Override
 	public boolean onSceneTouchEvent(Scene pScene, TouchEvent pSceneTouchEvent) {
@@ -157,7 +164,12 @@ public class PhysicsGameActivity extends SimpleBaseGameActivity implements
 			body = PhysicsFactory.createCircleBody(this.mPhysicsWorld, face,
 					BodyType.DynamicBody, FIXTURE_DEF);
 
-			this.mDynamicSprites .add(face);
+			if (mDynamicSprites.isEmpty()) {
+				this.mStartTime = System.currentTimeMillis();
+			}
+
+			this.mDynamicSprites.add(face);
+
 			this.mScene.attachChild(face);
 			this.mPhysicsWorld.registerPhysicsConnector(new PhysicsConnector(
 					face, body, true, true));
