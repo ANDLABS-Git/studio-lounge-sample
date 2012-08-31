@@ -9,10 +9,10 @@ import org.andengine.engine.camera.ZoomCamera;
 import org.andengine.engine.handler.IUpdateHandler;
 import org.andengine.engine.options.EngineOptions;
 import org.andengine.engine.options.ScreenOrientation;
+import org.andengine.engine.options.resolutionpolicy.FillResolutionPolicy;
 import org.andengine.engine.options.resolutionpolicy.RatioResolutionPolicy;
 import org.andengine.entity.scene.IOnSceneTouchListener;
 import org.andengine.entity.scene.Scene;
-import org.andengine.entity.sprite.AnimatedSprite;
 import org.andengine.entity.sprite.Sprite;
 import org.andengine.entity.text.Text;
 import org.andengine.entity.util.FPSLogger;
@@ -21,22 +21,20 @@ import org.andengine.extension.physics.box2d.PhysicsFactory;
 import org.andengine.extension.physics.box2d.PhysicsWorld;
 import org.andengine.input.touch.TouchEvent;
 import org.andengine.input.touch.detector.PinchZoomDetector;
-import org.andengine.input.touch.detector.ScrollDetector;
-import org.andengine.input.touch.detector.SurfaceScrollDetector;
 import org.andengine.input.touch.detector.PinchZoomDetector.IPinchZoomDetectorListener;
+import org.andengine.input.touch.detector.ScrollDetector;
 import org.andengine.input.touch.detector.ScrollDetector.IScrollDetectorListener;
+import org.andengine.input.touch.detector.SurfaceScrollDetector;
 import org.andengine.opengl.font.Font;
 import org.andengine.opengl.texture.ITexture;
 import org.andengine.opengl.texture.PixelFormat;
 import org.andengine.opengl.texture.TextureManager;
 import org.andengine.opengl.texture.TextureOptions;
 import org.andengine.opengl.texture.atlas.bitmap.BitmapTextureAtlas;
-import org.andengine.opengl.texture.atlas.bitmap.BitmapTextureAtlasTextureRegionFactory;
 import org.andengine.opengl.texture.bitmap.BitmapTexture;
 import org.andengine.opengl.texture.bitmap.BitmapTextureFormat;
 import org.andengine.opengl.texture.region.TextureRegion;
 import org.andengine.opengl.texture.region.TextureRegionFactory;
-import org.andengine.opengl.texture.region.TiledTextureRegion;
 import org.andengine.opengl.vbo.VertexBufferObjectManager;
 import org.andengine.ui.activity.SimpleBaseGameActivity;
 import org.andengine.util.adt.io.in.IInputStreamOpener;
@@ -46,7 +44,9 @@ import android.content.Context;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.hardware.SensorManager;
+import android.os.Bundle;
 import android.util.Log;
+import android.widget.Toast;
 
 import com.badlogic.gdx.math.Vector2;
 import com.badlogic.gdx.physics.box2d.Body;
@@ -57,6 +57,8 @@ public class PhysicsGameActivity extends SimpleBaseGameActivity implements
 		IOnSceneTouchListener, IUpdateHandler, IScrollDetectorListener,
 		IPinchZoomDetectorListener {
 
+	private static final String EXTRA_RESULT = "result";
+	private static final String EXTRA_X = "x";
 	private static final int CAMERA_WIDTH = 720;
 	private static final int CAMERA_HEIGHT = 1280;
 
@@ -98,7 +100,7 @@ public class PhysicsGameActivity extends SimpleBaseGameActivity implements
 		this.mCamera.setBoundsEnabled(true);
 
 		return new EngineOptions(true, ScreenOrientation.PORTRAIT_FIXED,
-				new RatioResolutionPolicy(CAMERA_WIDTH, CAMERA_HEIGHT), mCamera);
+				new FillResolutionPolicy(), mCamera);
 	}
 
 	@Override
@@ -111,15 +113,15 @@ public class PhysicsGameActivity extends SimpleBaseGameActivity implements
 					TextureOptions.DEFAULT, "lounge_sample.png");
 			this.mGoalTextureRegion = loadResource(this, getTextureManager(),
 					PixelFormat.RGBA_8888, TextureOptions.DEFAULT, "goal.png");
-			this.mPandaTextureRegion = loadResource(this,
-					getTextureManager(), PixelFormat.RGBA_8888,
-					TextureOptions.DEFAULT, "character.png");
+			this.mPandaTextureRegion = loadResource(this, getTextureManager(),
+					PixelFormat.RGBA_8888, TextureOptions.DEFAULT,
+					"character.png");
 			this.mOtherPandaTextureRegion = loadResource(this,
 					getTextureManager(), PixelFormat.RGBA_8888,
 					TextureOptions.DEFAULT, "other_character.png");
 		} catch (IOException e) {
 			e.printStackTrace();
-		}		
+		}
 
 		this.mBitmapTextureAtlas.load();
 
@@ -129,7 +131,7 @@ public class PhysicsGameActivity extends SimpleBaseGameActivity implements
 				Typeface.create(Typeface.DEFAULT, Typeface.BOLD), FONT_SIZE,
 				true, Color.BLACK);
 		this.mFont.load();
-		
+
 		this.mDialog = new Dialog();
 		try {
 			this.mDialog.loadResources(this, getTextureManager());
@@ -200,7 +202,13 @@ public class PhysicsGameActivity extends SimpleBaseGameActivity implements
 					Log.i("Lounge physics sample", "Goal reached in "
 							+ mTimeDiff + " ms!");
 					this.mFinished = true;
-					this.mDialog.show(mCamera, mScene, getVertexBufferObjectManager());
+					
+					this.mOtherPanda = true;
+					sendGameResult(Long.toString(mTimeDiff));
+					
+					//TODO Show some actual content
+					this.mDialog.show(mCamera, mScene,
+							getVertexBufferObjectManager());
 				}
 			}
 		}
@@ -215,44 +223,47 @@ public class PhysicsGameActivity extends SimpleBaseGameActivity implements
 		// pinch zoom and scene moving
 		this.mPinchZoomDetector.onTouchEvent(pSceneTouchEvent);
 
-		if(this.mPinchZoomDetector.isZooming()) {
+		if (this.mPinchZoomDetector.isZooming()) {
 			this.mScrollDetector.setEnabled(false);
 		} else {
-			if(pSceneTouchEvent.isActionDown()) {
+			if (pSceneTouchEvent.isActionDown()) {
 				this.mScrollDetector.setEnabled(true);
 			}
 			this.mScrollDetector.onTouchEvent(pSceneTouchEvent);
 		}
-		
+
 		// adding new dynamic bodies
-		if (pSceneTouchEvent.isActionDown()) {
-			final Sprite face;
-			final Body body;
-			TextureRegion character = this.mPandaTextureRegion;
-			if(mOtherPanda ) {
-				character = this.mOtherPandaTextureRegion;
-			}
-			
-			face = new Sprite(pSceneTouchEvent.getX(), 5,
-					character,
-					getVertexBufferObjectManager());
-
-			body = PhysicsFactory.createCircleBody(this.mPhysicsWorld, face,
-					BodyType.DynamicBody, FIXTURE_DEF);
-
-			if (mDynamicSprites.isEmpty()) {
-				this.mStartTime = System.currentTimeMillis();
-			}
-
-			this.mDynamicSprites.add(face);
-
-			this.mScene.attachChild(face);
-			this.mPhysicsWorld.registerPhysicsConnector(new PhysicsConnector(
-					face, body, true, true));
-
+		if (pSceneTouchEvent.isActionDown() && !mOtherPanda) {
+			final float x = pSceneTouchEvent.getX();
+			addPanda(x);
+			sendNewPanda(x);
 		}
 
 		return true;
+	}
+
+	private void addPanda(final float pX) {
+		final Sprite face;
+		final Body body;
+		TextureRegion character = this.mPandaTextureRegion;
+		if (mOtherPanda) {
+			character = this.mOtherPandaTextureRegion;
+		}
+
+		face = new Sprite(pX, 5, character, getVertexBufferObjectManager());
+
+		body = PhysicsFactory.createCircleBody(this.mPhysicsWorld, face,
+				BodyType.DynamicBody, FIXTURE_DEF);
+
+		if (mDynamicSprites.isEmpty()) {
+			this.mStartTime = System.currentTimeMillis();
+		}
+
+		this.mDynamicSprites.add(face);
+
+		this.mScene.attachChild(face);
+		this.mPhysicsWorld.registerPhysicsConnector(new PhysicsConnector(face,
+				body, true, true));
 	}
 
 	public static TextureRegion loadResource(final Context pContext,
@@ -305,15 +316,43 @@ public class PhysicsGameActivity extends SimpleBaseGameActivity implements
 	@Override
 	public void onPinchZoom(final PinchZoomDetector pPinchZoomDetector,
 			final TouchEvent pTouchEvent, final float pZoomFactor) {
-		this.mCamera.setZoomFactor(Math.max(this.mPinchZoomStartedCameraZoomFactor
-				* pZoomFactor, 1));
+		this.mCamera.setZoomFactor(Math.max(
+				this.mPinchZoomStartedCameraZoomFactor * pZoomFactor, 1));
 	}
 
 	@Override
 	public void onPinchZoomFinished(final PinchZoomDetector pPinchZoomDetector,
 			final TouchEvent pTouchEvent, final float pZoomFactor) {
-		this.mCamera.setZoomFactor(Math.max(this.mPinchZoomStartedCameraZoomFactor
-				* pZoomFactor, 1));
+		this.mCamera.setZoomFactor(Math.max(
+				this.mPinchZoomStartedCameraZoomFactor * pZoomFactor, 1));
 	}
 
+	private void sendGameResult(String pResult) {
+		final Bundle bundle = new Bundle();
+		bundle.putString(EXTRA_RESULT, pResult);
+		sendMessage(bundle);
+	}
+
+	private void sendNewPanda(final float pX) {
+		final Bundle bundle = new Bundle();
+		bundle.putFloat(EXTRA_X, pX);
+		sendMessage(bundle);
+	}
+
+	private void sendMessage(final Bundle pBundle) {
+		// TODO: Lobby.getInstance().sendMessage(pBundle);
+	}
+
+	private void onMessageReceived(final Bundle pBundle) {
+		if (pBundle.containsKey(EXTRA_X)) {
+			addPanda(Float.parseFloat(pBundle.getString(EXTRA_X)));
+		} else if (pBundle.containsKey(EXTRA_RESULT)) {
+			// TODO: Do something with the result
+			Toast.makeText(
+					this,
+					"Result of other panda is "
+							+ pBundle.getString(EXTRA_RESULT),
+					Toast.LENGTH_LONG).show();
+		}
+	}
 }
