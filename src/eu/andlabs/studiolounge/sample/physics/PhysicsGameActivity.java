@@ -5,21 +5,28 @@ import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.List;
 
-import org.andengine.engine.camera.Camera;
+import org.andengine.engine.camera.ZoomCamera;
 import org.andengine.engine.handler.IUpdateHandler;
 import org.andengine.engine.options.EngineOptions;
 import org.andengine.engine.options.ScreenOrientation;
 import org.andengine.engine.options.resolutionpolicy.RatioResolutionPolicy;
 import org.andengine.entity.scene.IOnSceneTouchListener;
 import org.andengine.entity.scene.Scene;
-import org.andengine.entity.shape.IShape;
 import org.andengine.entity.sprite.AnimatedSprite;
 import org.andengine.entity.sprite.Sprite;
+import org.andengine.entity.text.Text;
 import org.andengine.entity.util.FPSLogger;
 import org.andengine.extension.physics.box2d.PhysicsConnector;
 import org.andengine.extension.physics.box2d.PhysicsFactory;
 import org.andengine.extension.physics.box2d.PhysicsWorld;
 import org.andengine.input.touch.TouchEvent;
+import org.andengine.input.touch.detector.PinchZoomDetector;
+import org.andengine.input.touch.detector.ScrollDetector;
+import org.andengine.input.touch.detector.SurfaceScrollDetector;
+import org.andengine.input.touch.detector.PinchZoomDetector.IPinchZoomDetectorListener;
+import org.andengine.input.touch.detector.ScrollDetector.IScrollDetectorListener;
+import org.andengine.opengl.font.Font;
+import org.andengine.opengl.texture.ITexture;
 import org.andengine.opengl.texture.PixelFormat;
 import org.andengine.opengl.texture.TextureManager;
 import org.andengine.opengl.texture.TextureOptions;
@@ -36,6 +43,8 @@ import org.andengine.util.adt.io.in.IInputStreamOpener;
 import org.andlabs.andengine.extension.physicsloader.PhysicsEditorLoader;
 
 import android.content.Context;
+import android.graphics.Color;
+import android.graphics.Typeface;
 import android.hardware.SensorManager;
 import android.util.Log;
 
@@ -45,13 +54,15 @@ import com.badlogic.gdx.physics.box2d.BodyDef.BodyType;
 import com.badlogic.gdx.physics.box2d.FixtureDef;
 
 public class PhysicsGameActivity extends SimpleBaseGameActivity implements
-		IOnSceneTouchListener, IUpdateHandler {
+		IOnSceneTouchListener, IUpdateHandler, IScrollDetectorListener,
+		IPinchZoomDetectorListener {
 
 	private static final int CAMERA_WIDTH = 720;
 	private static final int CAMERA_HEIGHT = 1280;
 
 	private static final FixtureDef FIXTURE_DEF = PhysicsFactory
 			.createFixtureDef(2, 0.5f, 0.5f);
+	private static final float FONT_SIZE = 48;
 
 	private BitmapTextureAtlas mBitmapTextureAtlas;
 
@@ -61,19 +72,30 @@ public class PhysicsGameActivity extends SimpleBaseGameActivity implements
 
 	private PhysicsWorld mPhysicsWorld;
 	private Sprite mBigAsset;
-	private TiledTextureRegion mCircleFaceTextureRegion;
+	private TextureRegion mPandaTextureRegion;
 
-	private Camera mCamera;
+	private ZoomCamera mCamera;
 	private TextureRegion mGoalTextureRegion;
 	private Sprite mGoal;
 	private List<Sprite> mDynamicSprites = new ArrayList<Sprite>();
 
 	private long mStartTime = 0;
 	private long mTimeDiff = 0;
+	private Font mFont;
+	private Text mText;
+	private boolean mFinished;
+	private SurfaceScrollDetector mScrollDetector;
+	private PinchZoomDetector mPinchZoomDetector;
+	private float mPinchZoomStartedCameraZoomFactor;
+	private Dialog mDialog;
+	private TextureRegion mOtherPandaTextureRegion;
+	private boolean mOtherPanda = false;
 
 	@Override
 	public EngineOptions onCreateEngineOptions() {
-		mCamera = new Camera(0, 0, CAMERA_WIDTH, CAMERA_HEIGHT);
+		this.mCamera = new ZoomCamera(0, 0, CAMERA_WIDTH, CAMERA_HEIGHT);
+		this.mCamera.setBounds(0, 0, CAMERA_WIDTH, CAMERA_HEIGHT);
+		this.mCamera.setBoundsEnabled(true);
 
 		return new EngineOptions(true, ScreenOrientation.PORTRAIT_FIXED,
 				new RatioResolutionPolicy(CAMERA_WIDTH, CAMERA_HEIGHT), mCamera);
@@ -82,21 +104,38 @@ public class PhysicsGameActivity extends SimpleBaseGameActivity implements
 	@Override
 	protected void onCreateResources() {
 		this.mBitmapTextureAtlas = new BitmapTextureAtlas(
-				this.getTextureManager(), 64, 32, TextureOptions.BILINEAR);
+				this.getTextureManager(), 32, 32, TextureOptions.BILINEAR);
 		try {
 			this.mBigAssetTextureRegion = loadResource(this,
 					getTextureManager(), PixelFormat.RGBA_8888,
 					TextureOptions.DEFAULT, "lounge_sample.png");
 			this.mGoalTextureRegion = loadResource(this, getTextureManager(),
 					PixelFormat.RGBA_8888, TextureOptions.DEFAULT, "goal.png");
+			this.mPandaTextureRegion = loadResource(this,
+					getTextureManager(), PixelFormat.RGBA_8888,
+					TextureOptions.DEFAULT, "character.png");
+			this.mOtherPandaTextureRegion = loadResource(this,
+					getTextureManager(), PixelFormat.RGBA_8888,
+					TextureOptions.DEFAULT, "other_character.png");
+		} catch (IOException e) {
+			e.printStackTrace();
+		}		
+
+		this.mBitmapTextureAtlas.load();
+
+		final ITexture fontTexture = new BitmapTextureAtlas(
+				this.getTextureManager(), 256, 256, TextureOptions.BILINEAR);
+		this.mFont = new Font(this.getFontManager(), fontTexture,
+				Typeface.create(Typeface.DEFAULT, Typeface.BOLD), FONT_SIZE,
+				true, Color.BLACK);
+		this.mFont.load();
+		
+		this.mDialog = new Dialog();
+		try {
+			this.mDialog.loadResources(this, getTextureManager());
 		} catch (IOException e) {
 			e.printStackTrace();
 		}
-		this.mCircleFaceTextureRegion = BitmapTextureAtlasTextureRegionFactory
-				.createTiledFromAsset(this.mBitmapTextureAtlas, this,
-						"face_circle_tiled.png", 0, 0, 2, 1); // 64x32
-
-		this.mBitmapTextureAtlas.load();
 	}
 
 	@Override
@@ -131,18 +170,37 @@ public class PhysicsGameActivity extends SimpleBaseGameActivity implements
 			e.printStackTrace();
 		}
 
+		// Pinch zoom and camera movement
+		this.mScrollDetector = new SurfaceScrollDetector(this);
+		this.mPinchZoomDetector = new PinchZoomDetector(this);
+
 		this.mScene.registerUpdateHandler(this.mPhysicsWorld);
+
+		this.mText = new Text(10, 10, this.mFont, "0.00000000 seconds",
+				getVertexBufferObjectManager());
+		this.mScene.attachChild(mText);
+
+		this.mScene.setTouchAreaBindingOnActionDownEnabled(true);
 
 		return this.mScene;
 	}
 
 	@Override
 	public void onUpdate(float pSecondsElapsed) {
+
+		if (mStartTime != 0 && !mFinished) {
+			this.mTimeDiff = System.currentTimeMillis() - mStartTime;
+			this.mText.setText((float) (mTimeDiff / 1000.0) + " seconds");
+		}
+
 		for (Sprite sprite : mDynamicSprites) {
 			if (mGoal.collidesWith(sprite)) {
-				if(mTimeDiff  == 0) {
+				if (!mFinished) {
 					this.mTimeDiff = System.currentTimeMillis() - mStartTime;
-					Log.i("Lounge physics sample", "Goal reached in "+ mTimeDiff + " ms!");
+					Log.i("Lounge physics sample", "Goal reached in "
+							+ mTimeDiff + " ms!");
+					this.mFinished = true;
+					this.mDialog.show(mCamera, mScene, getVertexBufferObjectManager());
 				}
 			}
 		}
@@ -154,11 +212,29 @@ public class PhysicsGameActivity extends SimpleBaseGameActivity implements
 
 	@Override
 	public boolean onSceneTouchEvent(Scene pScene, TouchEvent pSceneTouchEvent) {
+		// pinch zoom and scene moving
+		this.mPinchZoomDetector.onTouchEvent(pSceneTouchEvent);
+
+		if(this.mPinchZoomDetector.isZooming()) {
+			this.mScrollDetector.setEnabled(false);
+		} else {
+			if(pSceneTouchEvent.isActionDown()) {
+				this.mScrollDetector.setEnabled(true);
+			}
+			this.mScrollDetector.onTouchEvent(pSceneTouchEvent);
+		}
+		
+		// adding new dynamic bodies
 		if (pSceneTouchEvent.isActionDown()) {
-			final AnimatedSprite face;
+			final Sprite face;
 			final Body body;
-			face = new AnimatedSprite(pSceneTouchEvent.getX(), 5,
-					this.mCircleFaceTextureRegion,
+			TextureRegion character = this.mPandaTextureRegion;
+			if(mOtherPanda ) {
+				character = this.mOtherPandaTextureRegion;
+			}
+			
+			face = new Sprite(pSceneTouchEvent.getX(), 5,
+					character,
 					getVertexBufferObjectManager());
 
 			body = PhysicsFactory.createCircleBody(this.mPhysicsWorld, face,
@@ -174,9 +250,9 @@ public class PhysicsGameActivity extends SimpleBaseGameActivity implements
 			this.mPhysicsWorld.registerPhysicsConnector(new PhysicsConnector(
 					face, body, true, true));
 
-			return true;
 		}
-		return false;
+
+		return true;
 	}
 
 	public static TextureRegion loadResource(final Context pContext,
@@ -194,6 +270,50 @@ public class PhysicsGameActivity extends SimpleBaseGameActivity implements
 		texture.load();
 
 		return TextureRegionFactory.extractFromTexture(texture);
+	}
+
+	@Override
+	public void onScrollStarted(final ScrollDetector pScollDetector,
+			final int pPointerID, final float pDistanceX, final float pDistanceY) {
+		final float zoomFactor = this.mCamera.getZoomFactor();
+		this.mCamera.offsetCenter(-pDistanceX / zoomFactor, -pDistanceY
+				/ zoomFactor);
+	}
+
+	@Override
+	public void onScroll(final ScrollDetector pScollDetector,
+			final int pPointerID, final float pDistanceX, final float pDistanceY) {
+		final float zoomFactor = this.mCamera.getZoomFactor();
+		this.mCamera.offsetCenter(-pDistanceX / zoomFactor, -pDistanceY
+				/ zoomFactor);
+	}
+
+	@Override
+	public void onScrollFinished(final ScrollDetector pScollDetector,
+			final int pPointerID, final float pDistanceX, final float pDistanceY) {
+		final float zoomFactor = this.mCamera.getZoomFactor();
+		this.mCamera.offsetCenter(-pDistanceX / zoomFactor, -pDistanceY
+				/ zoomFactor);
+	}
+
+	@Override
+	public void onPinchZoomStarted(final PinchZoomDetector pPinchZoomDetector,
+			final TouchEvent pTouchEvent) {
+		this.mPinchZoomStartedCameraZoomFactor = this.mCamera.getZoomFactor();
+	}
+
+	@Override
+	public void onPinchZoom(final PinchZoomDetector pPinchZoomDetector,
+			final TouchEvent pTouchEvent, final float pZoomFactor) {
+		this.mCamera.setZoomFactor(Math.max(this.mPinchZoomStartedCameraZoomFactor
+				* pZoomFactor, 1));
+	}
+
+	@Override
+	public void onPinchZoomFinished(final PinchZoomDetector pPinchZoomDetector,
+			final TouchEvent pTouchEvent, final float pZoomFactor) {
+		this.mCamera.setZoomFactor(Math.max(this.mPinchZoomStartedCameraZoomFactor
+				* pZoomFactor, 1));
 	}
 
 }
