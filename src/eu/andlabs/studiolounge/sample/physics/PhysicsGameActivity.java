@@ -10,7 +10,6 @@ import org.andengine.engine.handler.IUpdateHandler;
 import org.andengine.engine.options.EngineOptions;
 import org.andengine.engine.options.ScreenOrientation;
 import org.andengine.engine.options.resolutionpolicy.FillResolutionPolicy;
-import org.andengine.engine.options.resolutionpolicy.RatioResolutionPolicy;
 import org.andengine.entity.scene.IOnSceneTouchListener;
 import org.andengine.entity.scene.Scene;
 import org.andengine.entity.sprite.Sprite;
@@ -19,6 +18,8 @@ import org.andengine.entity.util.FPSLogger;
 import org.andengine.extension.physics.box2d.PhysicsConnector;
 import org.andengine.extension.physics.box2d.PhysicsFactory;
 import org.andengine.extension.physics.box2d.PhysicsWorld;
+import org.andengine.extension.physics.box2d.util.Vector2Pool;
+import org.andengine.input.sensor.acceleration.AccelerationData;
 import org.andengine.input.touch.TouchEvent;
 import org.andengine.input.touch.detector.PinchZoomDetector;
 import org.andengine.input.touch.detector.PinchZoomDetector.IPinchZoomDetectorListener;
@@ -53,9 +54,13 @@ import com.badlogic.gdx.physics.box2d.Body;
 import com.badlogic.gdx.physics.box2d.BodyDef.BodyType;
 import com.badlogic.gdx.physics.box2d.FixtureDef;
 
+import eu.andlabs.studiolounge.gcp.GCPService;
+import eu.andlabs.studiolounge.gcp.Lounge;
+import eu.andlabs.studiolounge.gcp.Lounge.GameMsgListener;
+
 public class PhysicsGameActivity extends SimpleBaseGameActivity implements
 		IOnSceneTouchListener, IUpdateHandler, IScrollDetectorListener,
-		IPinchZoomDetectorListener {
+		IPinchZoomDetectorListener, GameMsgListener {
 
 	private static final String EXTRA_RESULT = "result";
 	private static final String EXTRA_X = "x";
@@ -92,6 +97,20 @@ public class PhysicsGameActivity extends SimpleBaseGameActivity implements
 	private Dialog mDialog;
 	private TextureRegion mOtherPandaTextureRegion;
 	private boolean mOtherPanda = false;
+
+	private Lounge mLounge;
+
+	@Override
+	protected void onStart() {
+		mLounge = GCPService.bind(this);
+		
+		mLounge.register(this);
+	}
+
+	@Override
+	protected void onStop() {
+		GCPService.unbind(this, mLounge);
+	}
 
 	@Override
 	public EngineOptions onCreateEngineOptions() {
@@ -163,7 +182,13 @@ public class PhysicsGameActivity extends SimpleBaseGameActivity implements
 				- mGoalTextureRegion.getHeight() - 5, this.mGoalTextureRegion,
 				vertexBufferObjectManager);
 		this.mScene.attachChild(mGoal);
-
+		
+		
+		
+		
+		
+		
+		//********************
 		final PhysicsEditorLoader loader = new PhysicsEditorLoader();
 		try {
 			loader.load(this, mPhysicsWorld, "lounge_sample.xml", mBigAsset,
@@ -171,7 +196,12 @@ public class PhysicsGameActivity extends SimpleBaseGameActivity implements
 		} catch (IOException e) {
 			e.printStackTrace();
 		}
-
+		//********************
+		
+		
+		
+		
+		
 		// Pinch zoom and camera movement
 		this.mScrollDetector = new SurfaceScrollDetector(this);
 		this.mPinchZoomDetector = new PinchZoomDetector(this);
@@ -202,11 +232,11 @@ public class PhysicsGameActivity extends SimpleBaseGameActivity implements
 					Log.i("Lounge physics sample", "Goal reached in "
 							+ mTimeDiff + " ms!");
 					this.mFinished = true;
-					
+
 					this.mOtherPanda = true;
 					sendGameResult(Long.toString(mTimeDiff));
-					
-					//TODO Show some actual content
+
+					// TODO Show some actual content
 					this.mDialog.show(mCamera, mScene,
 							getVertexBufferObjectManager());
 				}
@@ -340,10 +370,10 @@ public class PhysicsGameActivity extends SimpleBaseGameActivity implements
 	}
 
 	private void sendMessage(final Bundle pBundle) {
-		// TODO: Lobby.getInstance().sendMessage(pBundle);
+		 this.mLounge.sendGameMessage(pBundle);
 	}
 
-	private void onMessageReceived(final Bundle pBundle) {
+	public void onMessageRecieved(final Bundle pBundle) {
 		if (pBundle.containsKey(EXTRA_X)) {
 			addPanda(Float.parseFloat(pBundle.getString(EXTRA_X)));
 		} else if (pBundle.containsKey(EXTRA_RESULT)) {
